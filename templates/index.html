@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>スマート電話帳</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gray-100 transition-all duration-300" style="max-width: 800px;">
+    <div class="container mx-auto px-4 py-8">
+        <header class="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-6 rounded-lg shadow-lg mb-8">
+            <h1 class="text-4xl font-bold text-center">スマート電話帳</h1>
+            <p class="text-center mt-2">あなたの連絡先を賢く管理</p>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div class="bg-white shadow-md rounded-lg p-6 hover:shadow-xl transition-shadow duration-300">
+                <h2 class="text-2xl font-semibold mb-4 flex items-center">
+                    <i class="fas fa-search mr-2 text-blue-500"></i>連絡先を検索
+                </h2>
+                <form id="searchForm" class="mb-4">
+                    <div class="relative">
+                        <input type="text" id="searchInput" placeholder="名前または電話番号を入力" class="w-full pl-10 pr-4 py-2 rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <i class="fas fa-search absolute left-3 top-3 text-gray-400"></i>
+                    </div>
+                    <button type="submit" class="mt-2 w-full bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600 transition-colors duration-300">検索</button>
+                </form>
+                <div id="searchResults" class="space-y-2 max-h-60 overflow-y-auto"></div>
+            </div>
+
+            <div class="bg-white shadow-md rounded-lg p-6 hover:shadow-xl transition-shadow duration-300">
+                <h2 class="text-2xl font-semibold mb-4 flex items-center">
+                    <i class="fas fa-user-plus mr-2 text-green-500"></i>新しい連絡先を追加
+                </h2>
+                <form id="addForm" method="POST" action="{{ url_for('add_contact') }}">
+                    <div class="mb-4">
+                        <label for="name" class="block text-sm font-medium text-gray-700">名前</label>
+                        <input type="text" id="name" name="name" required class="mt-1 w-full px-4 py-2 rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-green-500">
+                    </div>
+                    <div class="mb-4">
+                        <label for="phone" class="block text-sm font-medium text-gray-700">電話番号</label>
+                        <input type="tel" id="phone" name="phone" required pattern="\d{10,}" class="mt-1 w-full px-4 py-2 rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-green-500">
+                    </div>
+                    <button type="submit" class="w-full bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600 transition-colors duration-300">追加</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="mt-8 bg-white shadow-md rounded-lg p-6 hover:shadow-xl transition-shadow duration-300">
+            <h2 class="text-2xl font-semibold mb-4 flex items-center">
+                <i class="fas fa-address-book mr-2 text-purple-500"></i>連絡先一覧
+            </h2>
+            <div id="contactList" class="space-y-2 max-h-96 overflow-y-auto"></div>
+        </div>
+
+        <div class="mt-8 bg-white shadow-md rounded-lg p-6 hover:shadow-xl transition-shadow duration-300">
+            <h2 class="text-2xl font-semibold mb-4 flex items-center">
+                <i class="fas fa-chart-pie mr-2 text-yellow-500"></i>連絡先統計
+            </h2>
+            <canvas id="contactChart" width="400" height="200"></canvas>
+        </div>
+    </div>
+
+    <script>
+        // 連絡先の検索
+        document.getElementById('searchForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const query = document.getElementById('searchInput').value;
+            const response = await fetch(`/search?query=${encodeURIComponent(query)}`);
+            const contacts = await response.json();
+            const resultsDiv = document.getElementById('searchResults');
+            resultsDiv.innerHTML = contacts.map(c => `
+                <div class="bg-gray-100 p-2 rounded-md flex justify-between items-center">
+                    <span>${c.name}: ${c.phone}</span>
+                    <button onclick="copyToClipboard('${c.phone}')" class="text-blue-500 hover:text-blue-700">
+                        <i class="far fa-copy"></i>
+                    </button>
+                </div>
+            `).join('');
+        });
+
+        // 連絡先一覧の取得と表示
+        async function loadContacts() {
+            const response = await fetch('/contacts');
+            const contacts = await response.json();
+            const listDiv = document.getElementById('contactList');
+            listDiv.innerHTML = contacts.map(c => `
+                <div class="bg-gray-100 p-2 rounded-md flex justify-between items-center">
+                    <span>${c.name}: ${c.phone}</span>
+                    <div>
+                        <button onclick="copyToClipboard('${c.phone}')" class="text-blue-500 hover:text-blue-700 mr-2">
+                            <i class="far fa-copy"></i>
+                        </button>
+                        <button onclick="deleteContact(${c.id})" class="text-red-500 hover:text-red-700">
+                            <i class="far fa-trash-alt"></i>
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+            updateChart(contacts);
+        }
+
+        // 連絡先の削除
+        async function deleteContact(id) {
+            if (confirm('本当にこの連絡先を削除しますか？')) {
+                await fetch(`/delete/${id}`, { method: 'POST' });
+                loadContacts();
+            }
+        }
+
+        // クリップボードにコピー
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                alert('電話番号をクリップボードにコピーしました');
+            });
+        }
+
+        // チャートの更新
+        function updateChart(contacts) {
+            const ctx = document.getElementById('contactChart').getContext('2d');
+            const data = {
+                labels: ['1-3文字', '4-6文字', '7-9文字', '10文字以上'],
+                datasets: [{
+                    label: '名前の長さ分布',
+                    data: [
+                        contacts.filter(c => c.name.length <= 3).length,
+                        contacts.filter(c => c.name.length > 3 && c.name.length <= 6).length,
+                        contacts.filter(c => c.name.length > 6 && c.name.length <= 9).length,
+                        contacts.filter(c => c.name.length > 9).length
+                    ],
+                    backgroundColor: [
+                        'rgba(255, 99, 132, 0.2)',
+                        'rgba(54, 162, 235, 0.2)',
+                        'rgba(255, 206, 86, 0.2)',
+                        'rgba(75, 192, 192, 0.2)'
+                    ],
+                    borderColor: [
+                        'rgba(255, 99, 132, 1)',
+                        'rgba(54, 162, 235, 1)',
+                        'rgba(255, 206, 86, 1)',
+                        'rgba(75, 192, 192, 1)'
+                    ],
+                    borderWidth: 1
+                }]
+            };
+            new Chart(ctx, {
+                type: 'bar',
+                data: data,
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            stepSize: 1
+                        }
+                    }
+                }
+            });
+        }
+
+        // ページ読み込み時に連絡先一覧を表示
+        loadContacts();
+    </script>
+</body>
+</html>
